@@ -1,0 +1,119 @@
+---
+
+- hosts: "{{ target }}"
+  user: root
+  tasks:
+
+# NGINX INSTALL
+
+    - name: Install nginx
+      package:
+        name: nginx
+        state: latest
+
+    - name: Remove default conf
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Add custom config
+      copy:
+        src: custom.conf
+        dest: /etc/nginx/sites-available/
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create symlink to enable conf
+      file:
+        src: /etc/nginx/sites-available/custom.conf
+        dest: /etc/nginx/sites-enabled/custom.conf
+        state: link
+
+    - name: Enable and start service
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+
+# DOCKER AND COMPOSE INSTALL
+
+    - name: Install prerequisites
+      package:
+        name:
+          - curl
+          - gnupg
+          - ca-certificates
+          - lsb-release
+          - unzip
+        state: present
+
+    - name: Add Docker GPG key (Debian-based)
+      apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker repository (Debian-based)
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+        state: present
+
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker repository (RedHat-based)
+      yum_repository:
+        name: docker
+        description: Docker Repository
+        baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+        gpgcheck: yes
+        enabled: yes
+        gpgkey: https://download.docker.com/linux/centos/gpg
+      when: ansible_os_family == "RedHat"
+
+    - name: Install Docker
+      package:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Ensure Docker group exists
+      group:
+        name: docker
+        state: present
+
+    - name: Add user to Docker group
+      user:
+        name: "{{ ansible_user | default('root') }}"
+        groups: docker
+        append: yes
+
+    - name: Download Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64"
+        dest: "/usr/local/bin/docker-compose"
+        mode: 0755
+
+# OTHER
+
+    - name: Copy compose file
+      copy:
+        src: docker-compose.yml
+        dest: /opt/
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Start container via compose
+      shell:
+        cmd: "docker-compose up -d"
+        chdir: "/opt"
